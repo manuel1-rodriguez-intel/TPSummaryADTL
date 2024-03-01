@@ -1,0 +1,186 @@
+import os
+import csv
+import zipfile
+
+def openCSV(file,access):
+    rows = []
+    with open(file, access) as file:
+        csvreader = csv.reader(file)
+        header = next(csvreader)
+        for row in csvreader:
+            rows.append(row)
+    #print(header)
+    
+    return header, rows
+            
+def formatFlatten(header, rows):
+    KillHeader = header
+    KillRows = []
+    
+    #Delete all non iCVminTest
+    for row in rows:
+        if row[1] == 'iCVminTest':
+            KillRows.append(row)
+            
+    rows = KillRows
+    KillRows = []
+    
+    #Add Flow to header and rows
+    header.append('FLOW')
+    print(header)
+    for row in rows:
+        test = row[3].split('_')
+        row.append(test[4])
+        KillRows.append(row)
+    rows = []
+    #filter out non End, Pre, Post, and SDTEND tests
+    for row in KillRows:
+        flow = row[6]
+        if flow == 'END' or flow == 'PREHVQK' or flow == 'POSTHVQK' or flow == 'SDTEND':
+            rows.append(row)
+    #KillHeader = header[3, 0, 6, 2, 1, 4, 5]
+    
+    return KillHeader, KillRows
+    
+def collectADTL(rows):
+    ADTLs = {}
+    for row in rows:
+        ADTLs[row[0]+'_Slope'] = row[1]
+        ADTLs[row[0]+'_Intercept'] = row[2]
+        ADTLs[row[0]+'_Sigma'] = row[3]
+        ADTLs[row[0]+'_Steps'] = row[4]
+        ADTLs[row[0]+'_VminPredSlope'] = row[6]
+        ADTLs[row[0]+'_VminPredIntercept'] = row[7]
+        ADTLs[row[0]+'_VminPredSteps'] = row[8]
+        ADTLs[row[0]+'_VminPredOffset'] = row[9]
+        ADTLs[row[0]+'_VminPredFromIntercept'] = row[10]
+    return ADTLs
+    
+def collectVADTL(rows):
+    VADTLs = {}
+    for row in rows:
+        VADTLs[row[3]+'_Threshold'] = row[1]
+        VADTLs[row[4]+'_Threshold'] = row[1]
+        VADTLs[row[3]+'_ShiftName'] = row[2]
+        VADTLs[row[4]+'_ShiftName'] = row[2]        
+    return VADTLs
+        
+def formatVminSearch(header, rows):
+    NewRows = []
+    
+    #Delete undesireable column headers - Rows will follow in the loop
+    del header[2]
+    del header[2]
+    del header[6]
+    del header[9]
+    del header[9]
+    del header[9]
+    del header[9]
+    del header[9]
+    header.append('FLOW')
+    
+    for row in rows:
+        if row[7] == '':
+            continue
+        if 'vminResult:' in row[7]:
+            test = row[7].split(':')
+            row[7] = test[1]
+        test = row[7].split(',')
+        row[7] = test[0]
+        flow = row[7].split('_')
+        del row[2]
+        del row[2]
+        del row[6]
+        del row[9]
+        del row[9]
+        del row[9]
+        del row[9]
+        del row[9]
+
+        row.append(flow[3])
+        NewRows.append(row)
+    return header, NewRows
+def combineVADTLs(header, rows, VADTLs):
+    header.append('VADTLThreshold')
+    header.append('VADTLShiftName')
+    
+    NewRows = []
+    for row in rows:
+        try:
+            if row[9] == 'POSTHVQK' or row[9] == 'PREHVQK':
+                row.append(VADTLs[row[5]+'_Threshold'])
+                row.append(VADTLs[row[5]+'_ShiftName'])
+            else:
+                row.append('')
+                row.append('')
+        except KeyError:
+            row.append('')
+            row.append('')
+        NewRows.append(row)
+    return header, NewRows       
+          
+def combineADTLs(header, rows, ADTLs):
+    header.append('VminPredSlope')
+    header.append('VminPredIntercept')
+    header.append('VminPredSteps')
+    header.append('VminPredOffset')
+    header.append('VminPredOffsetFromIntercept')
+    header.append('ADTLSlope')
+    header.append('ADTLIntercept')
+    header.append('ADTLSigma')
+    header.append('ADTLSigMult')
+    
+    header.append('CurrentADTLStatus')
+    
+    NewRows = []
+    for row in rows:
+        try:
+            if row[9] != 'POSTHVQK':
+                row.append(ADTLs[row[5]+'_VminPredSlope'])
+                row.append(ADTLs[row[5]+'_VminPredIntercept'])    
+                row.append(ADTLs[row[5]+'_VminPredSteps'])
+                row.append(ADTLs[row[5]+'_VminPredOffset'])
+                row.append(ADTLs[row[5]+'_VminPredFromIntercept'])
+                row.append(ADTLs[row[5]+'_Slope'])
+                row.append(ADTLs[row[5]+'_Intercept'])
+                row.append(ADTLs[row[5]+'_Sigma'])
+                row.append(ADTLs[row[5]+'_Steps']) 
+                row.append('YES '+ADTLs[row[5]+'_Steps']+'-SIGMA')
+        except KeyError:
+            print("FailedToFind: "+row[5])
+        NewRows.append(row)
+    return header, NewRows
+        
+def main():
+
+    VADTLHeader, VADTLRows = openCSV('DA_CAKEVADTLAudit.csv','r')
+    ADTLHeader, ADTLRows = openCSV('DA_CAKEIDVADTLAudit.csv','r')
+    VSAHeader, VSARows = openCSV('DA_VMinSearchAudit.csv', 'r')
+    KillHeader, KillRows = openCSV('DA_Flatten_Instances.csv','r')
+    
+    #KillHeader, KillRows = formatFlatten(KillHeader,KillRows)
+    ADTLs = collectADTL(ADTLRows)
+    del ADTLHeader
+    del ADTLRows
+    
+    VADTLs = collectVADTL(VADTLRows)
+    del VADTLHeader
+    del VADTLRows
+   
+        
+    VSAHeader, VSARows = formatVminSearch(VSAHeader, VSARows)
+    
+    VSAHeader, VSARows = combineVADTLs(VSAHeader, VSARows, VADTLs)
+    VSAHeader, VSARows = combineADTLs(VSAHeader, VSARows, ADTLs)
+    
+    File = 'X_SummarFile.csv'
+    
+    with open(File, mode = 'w', newline='')as file:
+        writer = csv.writer(file)
+        writer.writerow(VSAHeader)
+        for row in VSARows:
+            writer.writerow(row)
+      
+
+if __name__ == '__main__':
+    main()
